@@ -22,6 +22,7 @@ defmodule SchemaGenerator.MixProject do
   defp deps do
     [
       {:ecto, "~> 3.10", optional: true, only: [:test]},
+      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:inflex, "~> 2.0", only: [:test, :dev]},
       {:sourceror, "~> 0.13", only: [:test, :dev]}
     ]
