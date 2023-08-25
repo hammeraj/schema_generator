@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Ecto.GenQueries do
+defmodule Mix.Tasks.Ecto.Gen.Queries do
   @moduledoc """
   Task for running a generator to write query functions. All query functions are designed to be composable,
   as in a query is required as the first argument. The task takes command line options to control
@@ -142,26 +142,47 @@ defmodule Mix.Tasks.Ecto.GenQueries do
   defp function_gen(schema_block, string_schema, schema_meta, options) do
     atom_schema = string_schema |> Inflex.singularize() |> String.to_atom()
 
-    {_, fields} =
-      Macro.prewalk(schema_block, [], fn
-        {:field, _meta, [{:__block__, _block_meta, [field]}, _type_block, options_block]} = original, acc ->
+    {_, field_meta} =
+      Macro.prewalk(schema_block, %{fields: [], primary_key: nil}, fn
+        {:field, _meta, [{:__block__, _block_meta, [field]}, _type_block, options_block]} =
+            original,
+        %{fields: fields} = acc ->
           if field_is_virtual?(options_block) do
             {original, acc}
           else
-            {original, [field | acc]}
+            acc =
+              if field_is_primary_key?(options_block),
+                do: Map.replace(acc, :primary_key, field),
+                else: acc
+
+            {original, Map.replace(acc, :fields, [field | fields])}
           end
+
+        {:belongs_to, _meta,
+         [
+           {:__block__, _assoc_block_meta, [_assoc]},
+           {:__aliases__, _alias_meta, _alias},
+           options_block
+         ]} = original,
+        %{fields: fields} = acc ->
+          foreign_key = find_foreign_key(options_block)
+          {original, Map.replace(acc, :fields, [foreign_key | fields])}
 
         other, acc ->
           {other, acc}
       end)
 
-    sort_functions = generate_sort_queries(fields, atom_schema, schema_meta.functions, options)
+    sort_functions =
+      generate_sort_queries(field_meta.fields, atom_schema, schema_meta.functions, options)
 
     primary_key_function =
-      generate_primary_key_query(schema_meta.primary_key, schema_meta.functions, options)
+      if is_nil(field_meta.primary_key),
+        do: generate_primary_key_query(schema_meta.primary_key, schema_meta.functions, options),
+        else: []
 
     Macro.prewalk(schema_block, [primary_key_function | sort_functions], fn
-      {:field, _meta, [{:__block__, _block_meta, [field]}, _type_block, options_block]} = original, acc ->
+      {:field, _meta, [{:__block__, _block_meta, [field]}, _type_block, options_block]} = original,
+      acc ->
         if field_is_virtual?(options_block) do
           {original, acc}
         else
@@ -202,19 +223,32 @@ defmodule Mix.Tasks.Ecto.GenQueries do
 
   defp find_foreign_key(options_block) do
     Enum.reduce_while(options_block, nil, fn
-      {{:__block__, _block_meta1, [:foreign_key]},
-            {:__block__, _block_meta2, [foreign_key]}}, _ -> {:halt, foreign_key}
+      {{:__block__, _block_meta1, [:foreign_key]}, {:__block__, _block_meta2, [foreign_key]}},
+      _ ->
+        {:halt, foreign_key}
 
-            _, acc -> {:cont, acc}
+      _, acc ->
+        {:cont, acc}
     end)
   end
 
   defp field_is_virtual?(options_block) do
     Enum.reduce_while(options_block, false, fn
-      {{:__block__, _block_meta1, [:virtual]},
-            {:__block__, _block_meta2, [true]}}, _ -> {:halt, true}
+      {{:__block__, _block_meta1, [:virtual]}, {:__block__, _block_meta2, [true]}}, _ ->
+        {:halt, true}
 
-            _, acc -> {:cont, acc}
+      _, acc ->
+        {:cont, acc}
+    end)
+  end
+
+  defp field_is_primary_key?(options_block) do
+    Enum.reduce_while(options_block, false, fn
+      {{:__block__, _block_meta1, [:primary_key]}, {:__block__, _block_meta2, [true]}}, _ ->
+        {:halt, true}
+
+      _, acc ->
+        {:cont, acc}
     end)
   end
 
