@@ -8,7 +8,8 @@ defmodule SchemaGenerator.MixProject do
       elixir: "~> 1.14",
       description: description(),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      package: package()
     ]
   end
 
