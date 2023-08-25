@@ -8,7 +8,7 @@ Add :schema_generator as a dependency to your project's `mix.exs`:
 ```
 defp deps do
   [
-    {:schema_generator, "~> 0.1"}
+    {:schema_generator, "~> 0.1", only: [:dev]}
   ]
 end
 ```
