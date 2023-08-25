@@ -34,7 +34,7 @@ defmodule SchemaGenerator.MixProject do
   defp package do
     [
       files: ~w(lib .formatter.exs mix.exs README* LICENSE*),
-      licenses: ["BSD 3-Clause License"],
+      licenses: ["BSD 3-Clause \"New\" or \"Revised\" License"],
       links: %{"GitHub" => "https://github.com/hammeraj/schema_generator"}
     ]
   end
