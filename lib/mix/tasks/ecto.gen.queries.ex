@@ -161,6 +161,11 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             {original, Map.replace(acc, :fields, [field | fields])}
           end
 
+        {:field, _meta, [{:__block__, _block_meta, [field]} | _]} =
+            original,
+        %{fields: fields} = acc ->
+          {original, Map.replace(acc, :fields, [field | fields])}
+
         {:belongs_to, _meta,
          [
            {:__block__, _assoc_block_meta, [_assoc]},
@@ -191,6 +196,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         else
           {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
         end
+
+      {:field, _meta, [{:__block__, _block_meta, [field]} | _]} = original,
+        acc ->
+          {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
 
       {:belongs_to, _meta,
        [
