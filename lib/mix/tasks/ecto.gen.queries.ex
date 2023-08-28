@@ -134,7 +134,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             File.write!(filename, string)
 
           error ->
-            IO.inspect(error)
+            log(:red, :skipping, "because #{filename} has generated invalid ast: #{inspect(error)}", options)
         end
       end
     else
@@ -153,9 +153,6 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           if field_is_virtual?(options_block) do
             {original, acc}
           else
-            IO.inspect(field)
-            IO.inspect(options_block)
-
             acc =
               if field_is_primary_key?(options_block),
                 do: Map.replace(acc, :primary_key, field),
