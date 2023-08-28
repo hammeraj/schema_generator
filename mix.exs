@@ -23,8 +23,8 @@ defmodule SchemaGenerator.MixProject do
     [
       {:ecto, "~> 3.10", optional: true, only: [:test]},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:inflex, "~> 2.0", only: [:test, :dev]},
-      {:sourceror, "~> 0.13", only: [:test, :dev]}
+      {:inflex, "~> 2.0"},
+      {:sourceror, "~> 0.13"}
     ]
   end
 

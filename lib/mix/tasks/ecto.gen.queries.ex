@@ -16,6 +16,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   """
   use Mix.Task
 
+  @preferred_cli_env :dev
   @shortdoc "Writes by_*, with_*, and sort functions based on the schema struct"
   @switches [
     skip_fields: :boolean,
@@ -83,8 +84,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       {_, schema_meta} =
         ast
         |> Macro.prewalk(%{functions: [], primary_key: nil}, fn
-          {:@, _meta1, [{:primary_key, _meta2, [primary_key]}]} = ast, acc ->
-            {ast, Map.replace(acc, :primary_key, primary_key)}
+          {:@, _meta1, [{:primary_key, _meta2, [{:__block__, _meta3, [primary_key]}]}]} = ast,
+          acc ->
+            acc = if primary_key, do: Map.replace(acc, :primary_key, primary_key), else: acc
+            {ast, acc}
 
           {:def, _meta1, [{:when, _meta2, [{fun_name, _, _} | _]} | _]} = ast,
           %{functions: functions} = acc ->
@@ -150,6 +153,9 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           if field_is_virtual?(options_block) do
             {original, acc}
           else
+            IO.inspect(field)
+            IO.inspect(options_block)
+
             acc =
               if field_is_primary_key?(options_block),
                 do: Map.replace(acc, :primary_key, field),
