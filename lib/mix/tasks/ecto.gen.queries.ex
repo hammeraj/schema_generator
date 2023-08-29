@@ -134,7 +134,12 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             File.write!(filename, string)
 
           error ->
-            log(:red, :skipping, "because #{filename} has generated invalid ast: #{inspect(error)}", options)
+            log(
+              :red,
+              :skipping,
+              "because #{filename} has generated invalid ast: #{inspect(error)}",
+              options
+            )
         end
       end
     else
@@ -161,8 +166,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             {original, Map.replace(acc, :fields, [field | fields])}
           end
 
-        {:field, _meta, [{:__block__, _block_meta, [field]} | _]} =
-            original,
+        {:field, _meta, [{:__block__, _block_meta, [field]} | _]} = original,
         %{fields: fields} = acc ->
           {original, Map.replace(acc, :fields, [field | fields])}
 
@@ -197,9 +201,8 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
         end
 
-      {:field, _meta, [{:__block__, _block_meta, [field]} | _]} = original,
-        acc ->
-          {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
+      {:field, _meta, [{:__block__, _block_meta, [field]} | _]} = original, acc ->
+        {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
 
       {:belongs_to, _meta,
        [
@@ -379,11 +382,18 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
                  {:sort, [],
                   [
                     {{:., [], [{:__aliases__, [], [:Ecto, :Queryable]}, :t]}, [], []},
-                    {{:., [], [{:__aliases__, [], [:String]}, :t]}, [], []}
+                    {:|, [], [{{:., [], [{:__aliases__, [], [:String]}, :t]}, [], []}, nil]}
                   ]},
                  {{:., [], [{:__aliases__, [], [:Ecto, :Queryable]}, :t]}, [], []}
                ]}
             ]}
+         ]},
+        {:def, [],
+         [
+           {:sort, [], [{:query, [], nil}, {:__block__, [], [nil]}]},
+           [
+             {{:__block__, [format: :keyword], [:do]}, {:query, [], nil}}
+           ]
          ]},
         Enum.flat_map(fields, fn field ->
           [
