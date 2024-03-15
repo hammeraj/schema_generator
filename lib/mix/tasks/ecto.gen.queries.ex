@@ -27,6 +27,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   ]
   @primary_key_default "id"
 
+  defmodule SchemaMeta do
+    defstruct primary_key: nil, functions: [], version: nil
+  end
+
   @impl true
   def run(args) do
     defaults = [
@@ -76,14 +80,44 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   def generate_query_functions(filename, options) do
     log(:green, :generating, "schema functions for #{filename}", options)
 
+    filestring = File.read!(filename)
+    generated_regex = ~r/\@schema_gen_tag\s.*\n/
+
+    cleaned_filestring =
+      case Regex.split(generated_regex, filestring) do
+        [start, _ignore, finish] ->
+          start <> finish
+
+        _ ->
+          filestring
+      end
+
+    {_, version} =
+      Macro.prewalk(Sourceror.parse_string!(filestring), nil, fn
+        {:@, _meta1,
+         [
+           {:schema_gen_tag, _meta2,
+            [
+              [
+                {{:__block__, _block_meta, [:queries_start]},
+                 {:__block__, _block_meta2, [version]}}
+              ]
+            ]}
+         ]} = ast,
+        _acc ->
+          {ast, version}
+
+        other, acc ->
+          {other, acc}
+      end)
+
     with {:defmodule, module_meta,
           [
             {:__aliases__, alias_meta, module},
             [{{:__block__, _do_block_meta, [:do]}, {:__block__, _block_meta, module_children}}]
-          ]} = ast <- Sourceror.parse_string!(File.read!(filename)) do
+          ]} = ast <- Sourceror.parse_string!(cleaned_filestring) do
       {_, schema_meta} =
-        ast
-        |> Macro.prewalk(%{functions: [], primary_key: nil}, fn
+        Macro.prewalk(ast, %SchemaMeta{version: version}, fn
           {:@, _meta1, [{:primary_key, _meta2, [{:__block__, _meta3, [primary_key]}]}]} = ast,
           acc ->
             acc = if primary_key, do: Map.replace(acc, :primary_key, primary_key), else: acc
@@ -117,29 +151,50 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             {other, acc}
         end)
 
+      generated_ast = List.flatten(generated_ast)
+
       if generated_ast == [] do
         log(:red, :skipping, "because #{filename} has no generated functions", options)
       else
-        new_ast =
-          {:defmodule, module_meta,
-           [
-             {:__aliases__, alias_meta, module},
-             [do: {:__block__, [], List.flatten([module_children | generated_ast])}]
-           ]}
+        old_version = schema_meta.version
+        version = :md5 |> :crypto.hash(Sourceror.to_string(generated_ast)) |> Base.encode64()
 
-        case Macro.validate(new_ast) do
-          :ok ->
-            string = Sourceror.to_string(new_ast)
+        if old_version == version do
+          log(:red, :skipping, "because #{filename} has no schema version changes", options)
+        else
+          new_ast =
+            {:defmodule, module_meta,
+             [
+               {:__aliases__, alias_meta, module},
+               [
+                 do:
+                   {:__block__, [],
+                    List.flatten([
+                      module_children
+                      | [
+                          leading_tag(version),
+                          generated_ast,
+                          generate_version_function(),
+                          trailing_tag()
+                        ]
+                    ])}
+               ]
+             ]}
 
-            File.write!(filename, string)
+          case Macro.validate(new_ast) do
+            :ok ->
+              string = Sourceror.to_string(new_ast)
 
-          error ->
-            log(
-              :red,
-              :skipping,
-              "because #{filename} has generated invalid ast: #{inspect(error)}",
-              options
-            )
+              File.write!(filename, string)
+
+            error ->
+              log(
+                :red,
+                :skipping,
+                "because #{filename} has generated invalid ast: #{inspect(error)}",
+                options
+              )
+          end
         end
       end
     else
@@ -508,6 +563,72 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
          ]}
       ]
     end
+  end
+
+  defp generate_version_function do
+    [
+      {:@, [],
+       [
+         {:spec, [],
+          [
+            {:"::", [],
+             [
+               {:generated_schema_version, [], []},
+               {{:., [],
+                 [
+                   {:__aliases__, [], [:String]},
+                   :t
+                 ]}, [], []}
+             ]}
+          ]}
+       ]},
+      {:def, [],
+       [
+         {:generated_schema_version, [], nil},
+         [
+           {{:__block__, [format: :keyword], [:do]},
+            {{:., [], [Access, :get]}, [],
+             [
+               {:@, [],
+                [
+                  {:schema_gen_tag, [], nil}
+                ]},
+               {:__block__, [], [:queries_start]}
+             ]}}
+         ]
+       ]}
+    ]
+  end
+
+  defp leading_tag(version) do
+    {:@,
+     [
+       trailing_comments: [
+         %{
+           text: "# Anything between the schema_gen_tag module attributes is generated",
+           line: nil,
+           previous_eol_count: 1,
+           column: nil,
+           next_eol_count: 1
+         },
+         %{
+           text: "# Any changes between the tags will be discarded on subsequent runs",
+           line: nil,
+           previous_eol_count: 1,
+           column: nil,
+           next_eol_count: 2
+         }
+       ],
+       end_of_expression: [newlines: 0]
+     ],
+     [
+       {:schema_gen_tag, [end_of_expression: [newlines: 0]],
+        [[{{:__block__, [format: :keyword], [:queries_start]}, {:__block__, [], [version]}}]]}
+     ]}
+  end
+
+  defp trailing_tag do
+    {:@, [], [{:schema_gen_tag, [], [{:__block__, [], [:queries_end]}]}]}
   end
 
   defp log(color, command, message, opts) do

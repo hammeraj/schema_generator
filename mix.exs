@@ -4,7 +4,7 @@ defmodule SchemaGenerator.MixProject do
   def project do
     [
       app: :schema_generator,
-      version: "0.1.3",
+      version: "0.2.0",
       elixir: "~> 1.14",
       description: description(),
       start_permanent: Mix.env() == :prod,
@@ -29,7 +29,7 @@ defmodule SchemaGenerator.MixProject do
   end
 
   defp description do
-    "Mix task to generate boilerplate functions on Ecto Schema files"
+    "Mix task to generate boilerplate query functions on Ecto Schema files"
   end
 
   defp package do
