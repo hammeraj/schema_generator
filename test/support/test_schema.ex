@@ -3,9 +3,12 @@ defmodule SchemaGenerator.TestSchema do
     Schema to use for testing generation
   """
   use Ecto.Schema
+  import Ecto.Changeset
+  import Ecto.Query
 
   @required [:name, :password]
   @optional [:age, :accepted_terms?]
+  @type t :: %__MODULE__{}
 
   schema "users" do
     field(:name, :string)
