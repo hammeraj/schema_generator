@@ -81,11 +81,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     log(:green, :generating, "schema functions for #{filename}", options)
 
     filestring = File.read!(filename)
-    generated_regex = ~r/\@schema_gen_tag\s.*\n/
+
+    generated_regex =
+      ~r/Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)?[\s\S]*\@schema_gen_tag\s.*\n/
 
     cleaned_filestring =
       case Regex.split(generated_regex, filestring) do
-        [start, _ignore, finish] ->
+        [start, finish] ->
           start <> finish
 
         _ ->
@@ -175,7 +177,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
                           leading_tag(version),
                           generated_ast,
                           generate_version_function(),
-                          trailing_tag()
+                          trailing_tag(version)
                         ]
                     ])}
                ]
@@ -587,13 +589,12 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
          {:generated_schema_version, [], nil},
          [
            {{:__block__, [format: :keyword], [:do]},
-            {{:., [], [Access, :get]}, [],
+            {{:., [], [List, :first]}, [],
              [
                {:@, [],
                 [
                   {:schema_gen_tag, [], nil}
-                ]},
-               {:__block__, [], [:queries_start]}
+                ]}
              ]}}
          ]
        ]}
@@ -601,34 +602,47 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   end
 
   defp leading_tag(version) do
-    {:@,
-     [
-       trailing_comments: [
-         %{
-           text: "# Anything between the schema_gen_tag module attributes is generated",
-           line: nil,
-           previous_eol_count: 1,
-           column: nil,
-           next_eol_count: 1
-         },
-         %{
-           text: "# Any changes between the tags will be discarded on subsequent runs",
-           line: nil,
-           previous_eol_count: 1,
-           column: nil,
-           next_eol_count: 2
-         }
+    [
+      {{:., [],
+        [
+          {:__aliases__, [], [:Module]},
+          :register_attribute
+        ]}, [],
+       [
+         {:__MODULE__, [], nil},
+         {:__block__, [], [:schema_gen_tag]},
+         [
+           {{:__block__, [format: :keyword], [:accumulate]}, {:__block__, [], [true]}}
+         ]
+       ]},
+      {:@,
+       [
+         trailing_comments: [
+           %{
+             text: "# Anything between the schema_gen_tag module attributes is generated",
+             line: nil,
+             previous_eol_count: 1,
+             column: nil,
+             next_eol_count: 1
+           },
+           %{
+             text: "# Any changes between the tags will be discarded on subsequent runs",
+             line: nil,
+             previous_eol_count: 1,
+             column: nil,
+             next_eol_count: 2
+           }
+         ],
+         end_of_expression: [newlines: 0]
        ],
-       end_of_expression: [newlines: 0]
-     ],
-     [
-       {:schema_gen_tag, [end_of_expression: [newlines: 0]],
-        [[{{:__block__, [format: :keyword], [:queries_start]}, {:__block__, [], [version]}}]]}
-     ]}
+       [
+         {:schema_gen_tag, [end_of_expression: [newlines: 0]], [{:__block__, [], [version]}]}
+       ]}
+    ]
   end
 
-  defp trailing_tag do
-    {:@, [], [{:schema_gen_tag, [], [{:__block__, [], [:queries_end]}]}]}
+  defp trailing_tag(version) do
+    {:@, [], [{:schema_gen_tag, [], [{:__block__, [], [version]}]}]}
   end
 
   defp log(color, command, message, opts) do

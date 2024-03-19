@@ -60,11 +60,13 @@ defmodule Mix.Tasks.Ecto.Rm.Queries do
     log(:green, :removing, "schema functions for #{filename}", options)
 
     filestring = File.read!(filename)
-    generated_regex = ~r/\@schema_gen_tag\s.*\n/
+
+    generated_regex =
+      ~r/Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)?[\s\S]*\@schema_gen_tag\s.*\n/
 
     new_filestring =
-      case Regex.split(generated_regex, filestring) |> IO.inspect() do
-        [start, _ignore, finish] ->
+      case Regex.split(generated_regex, filestring) do
+        [start, finish] ->
           start <> finish
 
         _ ->
