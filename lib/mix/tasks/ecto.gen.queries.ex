@@ -98,13 +98,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       Macro.prewalk(Sourceror.parse_string!(filestring), nil, fn
         {:@, _meta1,
          [
-           {:schema_gen_tag, _meta2,
-            [
-              [
-                {{:__block__, _block_meta, [:queries_start]},
-                 {:__block__, _block_meta2, [version]}}
-              ]
-            ]}
+           {:schema_gen_tag, _meta2, [{:__block__, _block_meta, [version]}]}
          ]} = ast,
         _acc ->
           {ast, version}
