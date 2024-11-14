@@ -26,6 +26,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     primary_key: :string
   ]
   @primary_key_default "id"
+  @default_function_order [:with_queries, :by_queries, :sort_queries]
 
   defmodule SchemaMeta do
     defstruct primary_key: nil, functions: [], version: nil
@@ -133,7 +134,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
       uniq_functions_schema_meta = Map.update!(schema_meta, :functions, &Enum.uniq/1)
 
-      {_ast, generated_ast} =
+      {_ast, generated_functions} =
         Macro.prewalk(ast, [], fn
           {:schema, _meta,
            [
@@ -147,13 +148,20 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             {other, acc}
         end)
 
-      generated_ast = List.flatten(generated_ast)
+      sorted_generated_functions =
+        @default_function_order
+        |> Enum.map(fn function_class ->
+          generated_functions |> List.flatten() |> Keyword.get(function_class) |> Enum.reverse()
+        end)
+        |> List.flatten()
 
-      if generated_ast == [] do
+      if sorted_generated_functions == [] do
         log(:red, :skipping, "because #{filename} has no generated functions", options)
       else
         old_version = schema_meta.version
-        version = :md5 |> :crypto.hash(Sourceror.to_string(generated_ast)) |> Base.encode64()
+
+        version =
+          :md5 |> :crypto.hash(Sourceror.to_string(sorted_generated_functions)) |> Base.encode64()
 
         if old_version == version do
           log(:red, :skipping, "because #{filename} has no schema version changes", options)
@@ -169,7 +177,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
                       module_children
                       | [
                           leading_tag(version),
-                          generated_ast,
+                          sorted_generated_functions,
                           generate_version_function(),
                           trailing_tag(version)
                         ]
@@ -231,6 +239,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           foreign_key = find_foreign_key(options_block)
           {original, Map.replace(acc, :fields, [foreign_key | fields])}
 
+        {:timestamps, _meta, []} = original, %{fields: fields} = acc ->
+          {original, Map.replace(acc, :fields, [:updated_at, :inserted_at | fields])}
+
+        {:timestamps, _meta, [timestamp_columns | _]} = original, %{fields: fields} = acc ->
+          {original,
+           Map.replace(acc, :fields, select_timestamp_columns(timestamp_columns) ++ fields)}
+
         other, acc ->
           {other, acc}
       end)
@@ -243,17 +258,57 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         do: generate_primary_key_query(schema_meta.primary_key, schema_meta.functions, options),
         else: []
 
-    Macro.prewalk(schema_block, [primary_key_function | sort_functions], fn
+    query_kw = [
+      sort_queries: sort_functions,
+      by_queries: [primary_key_function],
+      with_queries: []
+    ]
+
+    Macro.prewalk(schema_block, query_kw, fn
       {:field, _meta, [{:__block__, _block_meta, [field]}, _type_block, options_block]} = original,
       acc ->
         if field_is_virtual?(options_block) do
           {original, acc}
         else
-          {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
+          {original,
+           update_function_kw(
+             acc,
+             :by_queries,
+             generate_by_query(field, schema_meta.functions, options)
+           )}
         end
 
       {:field, _meta, [{:__block__, _block_meta, [field]} | _]} = original, acc ->
-        {original, [generate_by_query(field, schema_meta.functions, options) | acc]}
+        {original,
+         update_function_kw(
+           acc,
+           :by_queries,
+           generate_by_query(field, schema_meta.functions, options)
+         )}
+
+      {:timestamps, _meta, []} = original, acc ->
+        {original,
+         acc
+         |> update_function_kw(
+           :by_queries,
+           generate_by_query(:updated_at, schema_meta.functions, options)
+         )
+         |> update_function_kw(
+           :by_queries,
+           generate_by_query(:inserted_at, schema_meta.functions, options)
+         )}
+
+      {:timestamps, _meta, [timestamp_columns | _]} = original, acc ->
+        {original,
+         timestamp_columns
+         |> select_timestamp_columns()
+         |> Enum.map(
+           &update_function_kw(
+             acc,
+             :by_queries,
+             generate_by_query(&1, schema_meta.functions, options)
+           )
+         )}
 
       {:belongs_to, _meta,
        [
@@ -265,22 +320,39 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         foreign_key = find_foreign_key(options_block)
 
         {original,
-         [
-           generate_with_query(atom_schema, assoc, schema_meta.functions, options),
-           generate_by_query(foreign_key, schema_meta.functions, options) | acc
-         ]}
+         acc
+         |> update_function_kw(
+           :with_queries,
+           generate_with_query(atom_schema, assoc, schema_meta.functions, options)
+         )
+         |> update_function_kw(
+           :by_queries,
+           generate_by_query(foreign_key, schema_meta.functions, options)
+         )}
 
       {:has_many, _meta, [{:__block__, _block_meta, [assoc]} | _other]} = original, acc ->
         {original,
-         [generate_with_query(atom_schema, assoc, schema_meta.functions, options) | acc]}
+         update_function_kw(
+           acc,
+           :with_queries,
+           generate_with_query(atom_schema, assoc, schema_meta.functions, options)
+         )}
 
       {:has_one, _meta, [{:__block__, _block_meta, [assoc]} | _other]} = original, acc ->
         {original,
-         [generate_with_query(atom_schema, assoc, schema_meta.functions, options) | acc]}
+         update_function_kw(
+           acc,
+           :with_queries,
+           generate_with_query(atom_schema, assoc, schema_meta.functions, options)
+         )}
 
       {:many_to_many, _meta, [{:__block__, _block_meta, [assoc]} | _other]} = original, acc ->
         {original,
-         [generate_with_query(atom_schema, assoc, schema_meta.functions, options) | acc]}
+         update_function_kw(
+           acc,
+           :with_queries,
+           generate_with_query(atom_schema, assoc, schema_meta.functions, options)
+         )}
 
       other, acc ->
         {other, acc}
@@ -446,7 +518,8 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
              {{:__block__, [format: :keyword], [:do]}, {:query, [], nil}}
            ]
          ]},
-        Enum.flat_map(fields, fn field ->
+        fields
+        |> Enum.flat_map(fn field ->
           [
             {:def, [],
              [
@@ -479,6 +552,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
              ]}
           ]
         end)
+        |> Enum.reverse()
       ]
     end
   end
@@ -559,6 +633,38 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
          ]}
       ]
     end
+  end
+
+  defp select_timestamp_columns(timestamp_columns) do
+    timestamp_columns
+    |> Enum.reduce([], fn
+      {{:__block__, _key_meta, [:inserted_at]}, {:__block__, _value_meta, [inserted_at_column]}},
+      acc ->
+        Keyword.put_new(acc, :inserted_at, inserted_at_column)
+
+      {{:__block__, _key_meta, [:inserted_at_source]}, _}, acc ->
+        Keyword.put_new(acc, :inserted_at, :inserted_at)
+
+      {{:__block__, _key_meta, [:updated_at]}, {:__block__, _value_meta, [updated_at_column]}},
+      acc ->
+        Keyword.put_new(acc, :updated_at, updated_at_column)
+
+      {{:__block__, _key_meta, [:updated_at_source]}, _}, acc ->
+        Keyword.put_new(acc, :updated_at, :updated_at)
+
+      _, acc ->
+        acc
+    end)
+    |> Keyword.put_new(:inserted_at, :inserted_at)
+    |> Keyword.put_new(:updated_at, :updated_at)
+    |> Enum.filter(fn {_, falsy_column} -> falsy_column end)
+    |> Enum.map(fn {_, column} -> column end)
+  end
+
+  defp update_function_kw(function_kw, function_class, new_generated_function) do
+    Keyword.update(function_kw, function_class, [new_generated_function], fn existing ->
+      [new_generated_function | existing]
+    end)
   end
 
   defp generate_version_function do

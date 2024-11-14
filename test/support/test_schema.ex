@@ -18,6 +18,8 @@ defmodule SchemaGenerator.TestSchema do
     field(:accepted_terms?, :boolean, default: false)
     belongs_to(:office, Office, foreign_key: :office_id)
     has_many(:posts, Post)
+
+    timestamps()
   end
 
   # A comment for testing comments
