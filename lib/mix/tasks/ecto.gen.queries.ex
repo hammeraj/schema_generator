@@ -14,6 +14,11 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
     * `--primary_key` - allows overriding the default primary key function generation when the pk isn't found in the file
   """
+  defmodule SchemaMeta do
+    @moduledoc false
+    defstruct primary_key: nil, functions: [], version: nil
+  end
+
   use Mix.Task
 
   @preferred_cli_env :dev
@@ -27,10 +32,6 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   ]
   @primary_key_default "id"
   @default_function_order [:with_queries, :by_queries, :sort_queries]
-
-  defmodule SchemaMeta do
-    defstruct primary_key: nil, functions: [], version: nil
-  end
 
   @impl true
   def run(args) do
