@@ -6,13 +6,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   as a generated function, it will be skipped.
 
   ## Command line options
-    * `--skip_fields` - won't generate field based query functions, aka by_field(query, field)
+    * `--skip-fields` - won't generate field based query functions, aka by_field(query, field)
 
-    * `--skip_assocs` - won't generate assoc based query functions, aka with_assoc(query)
+    * `--skip-assocs` - won't generate assoc based query functions, aka with_assoc(query)
 
-    * `--skip_sort` - won't generate field sorting query functions, aka sort(query, "field_asc")
+    * `--skip-sort` - won't generate field sorting query functions, aka sort(query, "field_asc")
 
-    * `--primary_key` - allows overriding the default primary key function generation when the pk isn't found in the file
+    * `--primary-key` - allows overriding the default primary key function generation when the pk isn't found in the file
   """
   defmodule SchemaMeta do
     @moduledoc false
@@ -152,7 +152,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       sorted_generated_functions =
         @default_function_order
         |> Enum.map(fn function_class ->
-          generated_functions |> List.flatten() |> Keyword.get(function_class) |> Enum.reverse()
+          generated_functions |> List.flatten() |> Keyword.get(function_class, []) |> Enum.reverse()
         end)
         |> List.flatten()
 
