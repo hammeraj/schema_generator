@@ -152,7 +152,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       sorted_generated_functions =
         @default_function_order
         |> Enum.map(fn function_class ->
-          generated_functions |> List.flatten() |> Keyword.get(function_class, []) |> Enum.reverse()
+          generated_functions
+          |> List.flatten()
+          |> Keyword.get(function_class, [])
+          |> Enum.reverse()
         end)
         |> List.flatten()
 
@@ -190,7 +193,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
             :ok ->
               string = Sourceror.to_string(new_ast)
 
-              File.write!(filename, string)
+              File.write!(filename, string <> "\n")
 
             error ->
               log(
@@ -555,6 +558,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         end)
         |> Enum.reverse()
       ]
+      |> Enum.reverse()
     end
   end
 
