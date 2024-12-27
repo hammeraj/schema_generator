@@ -79,7 +79,7 @@ defmodule Mix.Tasks.Ecto.Rm.Queries do
       :ok ->
         string = Sourceror.to_string(new_ast)
 
-        File.write!(filename, string)
+        File.write!(filename, string <> "\n")
 
       error ->
         log(
