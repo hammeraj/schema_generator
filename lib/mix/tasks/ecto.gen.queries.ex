@@ -57,8 +57,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     results = generate(path, opts_with_defaults)
 
     if opts_with_defaults.ci and Enum.uniq(results) != [:noop] do
-      log(:red, :ci_failure, "some new query functions were generated or errors occurred", %{quiet: false})
-      log(:yellow, :ci_warning, "please run `mix ecto.gen.queries #{path}` and commit", %{quiet: false})
+      log(:red, :ci_failure, "some new query functions were generated or errors occurred", %{
+        quiet: false
+      })
+
+      log(:yellow, :ci_warning, "please run `mix ecto.gen.queries #{path}` and commit", %{
+        quiet: false
+      })
 
       exit({:shutdown, 1})
     end
@@ -105,12 +110,11 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
     filestring = File.read!(filename)
 
-    generated_regex =
-      ~r/Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)?[\s\S]*\@schema_gen_tag\s.*\n/
+    generated_regex = ~r/\@schema_gen_tag .*\n/
 
     cleaned_filestring =
       case Regex.split(generated_regex, filestring) do
-        [start, finish] ->
+        [start, _, finish] ->
           start <> finish
 
         _ ->
