@@ -6,13 +6,19 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   as a generated function, it will be skipped.
 
   ## Command line options
+    * {files_or_directory} - which file or files to generate query functions for
+
     * `--skip-fields` - won't generate field based query functions, aka by_field(query, field)
 
     * `--skip-assocs` - won't generate assoc based query functions, aka with_assoc(query)
 
     * `--skip-sort` - won't generate field sorting query functions, aka sort(query, "field_asc")
 
-    * `--primary-key` - allows overriding the default primary key function generation when the pk isn't found in the file
+    * `--primary-key {string}` - allows overriding the default primary key function generation when the pk isn't found in the file
+
+    * `--quiet` - runs without logging
+
+    * `--ci` - runs a validation for ci, if any files change it will generate an error
   """
   defmodule SchemaMeta do
     @moduledoc false
@@ -28,6 +34,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     skip_assocs: :boolean,
     skip_sort: :boolean,
     quiet: :boolean,
+    ci: :boolean,
     primary_key: :string
   ]
   @primary_key_default "id"
@@ -40,28 +47,41 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       skip_assocs: false,
       skip_sort: false,
       quiet: false,
+      ci: false,
       primary_key: @primary_key_default
     ]
 
     {options, path} = OptionParser.parse!(args, strict: @switches)
     opts_with_defaults = defaults |> Keyword.merge(options) |> Enum.into(%{})
 
-    generate(path, opts_with_defaults)
+    results = generate(path, opts_with_defaults)
+
+    if opts_with_defaults.ci and Enum.uniq(results) != [:noop] do
+      log(:red, :ci_failure, "some new query functions were generated or errors occurred", %{quiet: false})
+      log(:yellow, :ci_warning, "please run `mix ecto.gen.queries #{path}` and commit", %{quiet: false})
+
+      exit({:shutdown, 1})
+    end
   end
 
   def generate(path_or_files, options) when is_list(path_or_files) do
-    Enum.each(path_or_files, &generate(&1, options))
+    Enum.flat_map(path_or_files, &generate(&1, options))
   end
 
   def generate(path_or_file, options) do
     if File.dir?(path_or_file) do
       with {:ok, files} <- File.ls(path_or_file) do
-        Enum.each(files, fn file -> generate(path_or_file <> "/" <> file, options) end)
+        Enum.flat_map(files, fn file -> generate(path_or_file <> "/" <> file, options) end)
       end
     else
       case check_filename(path_or_file) do
-        :ok -> generate_query_functions(path_or_file, options)
-        {:error, reason} -> log(:red, :skipping, "because #{path_or_file} is #{reason}", options)
+        :ok ->
+          [generate_query_functions(path_or_file, options)]
+
+        {:error, reason} ->
+          log(:red, :skipping, "because #{path_or_file} is #{reason}", options)
+
+          [:noop]
       end
     end
   end
@@ -79,6 +99,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     end
   end
 
+  @spec generate_query_functions(binary(), map()) :: :error | :generated | :noop
   def generate_query_functions(filename, options) do
     log(:green, :generating, "schema functions for #{filename}", options)
 
@@ -161,6 +182,8 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
       if sorted_generated_functions == [] do
         log(:red, :skipping, "because #{filename} has no generated functions", options)
+
+        :noop
       else
         old_version = schema_meta.version
 
@@ -169,6 +192,8 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
         if old_version == version do
           log(:red, :skipping, "because #{filename} has no schema version changes", options)
+
+          :noop
         else
           new_ast =
             {:defmodule, module_meta,
@@ -191,9 +216,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
           case Macro.validate(new_ast) do
             :ok ->
-              string = Sourceror.to_string(new_ast)
+              unless options.ci do
+                string = Sourceror.to_string(new_ast)
 
-              File.write!(filename, string <> "\n")
+                File.write!(filename, string <> "\n")
+              end
+
+              :generated
 
             error ->
               log(
@@ -202,11 +231,16 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
                 "because #{filename} has generated invalid ast: #{inspect(error)}",
                 options
               )
+
+              :error
           end
         end
       end
     else
-      _ -> log(:red, :skipping, "because #{filename} is not readable", options)
+      _ ->
+        log(:red, :skipping, "because #{filename} is not readable", options)
+
+        :error
     end
   end
 
