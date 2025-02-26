@@ -61,13 +61,13 @@ defmodule Mix.Tasks.Ecto.Rm.Queries do
 
     filestring = File.read!(filename)
 
-    generated_regex =
-      ~r/Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)?[\s\S]*\@schema_gen_tag\s.*\n/
+    generated_regex = ~r/\@schema_gen_tag .*\n/
 
     new_filestring =
       case Regex.split(generated_regex, filestring) do
-        [start, finish] ->
-          start <> finish
+        [start, _, finish] ->
+          new_start = String.replace(start, "Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)\n", "")
+          new_start <> finish
 
         _ ->
           filestring

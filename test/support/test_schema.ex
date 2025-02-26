@@ -6,6 +6,9 @@ defmodule SchemaGenerator.TestSchema do
   import Ecto.Changeset
   import Ecto.Query
 
+  Module.register_attribute(__MODULE__, :default_country, persist: true)
+
+  @default_country "USA"
   @required [:name, :password]
   @optional [:age, :accepted_terms?]
   @type t :: %__MODULE__{}
@@ -16,6 +19,7 @@ defmodule SchemaGenerator.TestSchema do
     field(:password, :string, redact: true)
     field(:birth_year, :integer, virtual: true)
     field(:accepted_terms?, :boolean, default: false)
+    field(:country, :string, default: @default_country)
     belongs_to(:office, Office, foreign_key: :office_id)
     has_many(:posts, Post)
 
