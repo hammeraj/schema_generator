@@ -1,5 +1,8 @@
 # schema_generator
 
+[![Hex.pm](https://img.shields.io/hexpm/v/schema_generator.svg)](https://hex.pm/packages/schema_generator)
+[![API Docs](https://img.shields.io/badge/api-docs-yellow.svg?style=flat)](https://hexdocs.pm/schema_generator)
+
 Mix task to generate boilerplate functions on Ecto Schemas
 
 ## Installation
