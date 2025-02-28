@@ -3,7 +3,9 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   Task for running a generator to write query functions. All query functions are designed to be composable,
   as in a query is required as the first argument. The task takes command line options to control
   generating functions to only what is necessary. If a function already exists with the same name
-  as a generated function, it will be skipped.
+  as a generated function, it will be skipped. The exception for this is if a sort function is tagged as
+  :sg_override, using the syntax `@tag :sg_override`. This function will be kept, with other sort functions
+  generated as usual. Any of the overridden functions will be added after the generated sort functions.
 
   ## Command line options
     * {files_or_directory} - which file or files to generate query functions for
@@ -26,6 +28,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   end
 
   use Mix.Task
+  alias Sourceror.Zipper
 
   @preferred_cli_env :dev
   @shortdoc "Writes by_*, with_*, and sort functions based on the schema struct"
@@ -112,17 +115,29 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
 
     generated_regex = ~r/\@schema_gen_tag .*\n/
 
+    precleaned_ast = Sourceror.parse_string!(filestring)
+    {sg_overridden_sorts_removed_ast, existing_sorts} = extract_existing_sort_functions(precleaned_ast)
+
+    sg_overridden_removed_string = Sourceror.to_string(sg_overridden_sorts_removed_ast)
+
     cleaned_filestring =
-      case Regex.split(generated_regex, filestring) do
+      case Regex.split(generated_regex, sg_overridden_removed_string) do
         [start, _, finish] ->
-          start <> finish
+          new_start =
+            String.replace(
+              start,
+              "Module.register_attribute(__MODULE__, :schema_gen_tag, accumulate: true)\n",
+              ""
+            )
+
+          new_start <> finish
 
         _ ->
-          filestring
+          sg_overridden_removed_string
       end
 
     {_, version} =
-      Macro.prewalk(Sourceror.parse_string!(filestring), nil, fn
+      Macro.prewalk(precleaned_ast, nil, fn
         {:@, _meta1,
          [
            {:schema_gen_tag, _meta2, [{:__block__, _block_meta, [version]}]}
@@ -134,11 +149,13 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           {other, acc}
       end)
 
+    cleaned_ast = Sourceror.parse_string!(cleaned_filestring)
+
     with {:defmodule, module_meta,
           [
             {:__aliases__, alias_meta, module},
             [{{:__block__, _do_block_meta, [:do]}, {:__block__, _block_meta, module_children}}]
-          ]} = ast <- Sourceror.parse_string!(cleaned_filestring) do
+          ]} = ast <- cleaned_ast do
       {_, schema_meta} =
         Macro.prewalk(ast, %SchemaMeta{version: version}, fn
           {:@, _meta1, [{:primary_key, _meta2, [{:__block__, _meta3, [primary_key]}]}]} = ast,
@@ -168,7 +185,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
              [{{:__block__, _do_block_meta, [:do]}, _} | _]
            ]} = schema_block,
           _acc ->
-            function_gen(schema_block, schema_name, uniq_functions_schema_meta, options)
+            function_gen(schema_block, schema_name, uniq_functions_schema_meta, existing_sorts, options)
 
           other, acc ->
             {other, acc}
@@ -248,7 +265,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     end
   end
 
-  defp function_gen(schema_block, string_schema, schema_meta, options) do
+  defp function_gen(schema_block, string_schema, schema_meta, existing_sorts, options) do
     atom_schema = string_schema |> Inflex.singularize() |> String.to_atom()
 
     {_, field_meta} =
@@ -292,8 +309,15 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           {other, acc}
       end)
 
+    {existing_sort_funs, existing_sort_args} = Enum.map_reduce(existing_sorts, [], fn {sort_arg, sort_fun}, acc ->
+      {sort_fun, [sort_arg | acc]}
+    end)
+
+    existing_sort_funs_flat = existing_sort_funs |> List.flatten() |> Enum.map(&Zipper.node(&1)) |> Enum.reverse()
+    existing_sort_args_non_nil = Enum.filter(existing_sort_args, & &1)
+
     sort_functions =
-      generate_sort_queries(field_meta.fields, atom_schema, schema_meta.functions, options)
+      existing_sort_funs_flat ++ generate_sort_queries(field_meta.fields, atom_schema, schema_meta.functions, existing_sort_args_non_nil, options)
 
     primary_key_function =
       if is_nil(field_meta.primary_key),
@@ -432,6 +456,50 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     end)
   end
 
+  defp extract_existing_sort_functions(ast) do
+    {zipper, accumulated_sorts} =
+      ast
+      |> Zipper.zip()
+      |> Zipper.traverse([], fn
+        %Zipper{node: {:def, _meta1, [{:when, _meta2, [{:sort, _meta3, _args} | _]} | _]}} = zipper, acc ->
+          maybe_sg_override_tag = Zipper.left(zipper)
+
+          if sg_override_tag?(maybe_sg_override_tag) do
+            {zipper |> Zipper.remove() |> Zipper.find(:prev, &sg_override_tag?(&1)) |> Zipper.remove(), acc ++ [{nil, [maybe_sg_override_tag, zipper]}]}
+          else
+            {zipper, acc}
+          end
+
+        %Zipper{node: {:def, _meta1, [{:sort, _meta2, [_first_arg, {:__block__, _meta3, [filter_arg]}]} | _]}} = zipper, acc ->
+          maybe_sg_override_tag = Zipper.left(zipper)
+
+          if sg_override_tag?(maybe_sg_override_tag) do
+            {zipper |> Zipper.remove() |> Zipper.find(:prev, &sg_override_tag?(&1)) |> Zipper.remove(), acc ++ [{filter_arg, [maybe_sg_override_tag, zipper]}]}
+          else
+            {zipper, acc}
+          end
+
+        other, acc ->
+          {other, acc}
+      end)
+
+    {Zipper.node(zipper), accumulated_sorts}
+  end
+
+  def sg_override_tag?(%Zipper{
+        node: node
+      }) do
+    sg_override_tag?(node)
+  end
+
+  def sg_override_tag?({:@, _meta1, [{:tag, _meta2, [{:__block__, _meta3, [:sg_override]}]}]}) do
+    true
+  end
+
+  def sg_override_tag?(_) do
+    false
+  end
+
   defp generate_primary_key_query(_primary_key, _functions, %{skip_fields: true}), do: []
 
   defp generate_primary_key_query(nil, functions, %{primary_key: primary_key} = options) do
@@ -530,10 +598,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     end
   end
 
-  defp generate_sort_queries([], _schema, _functions, _opts), do: []
-  defp generate_sort_queries(_fields, _schema, _functions, %{skip_sort: true}), do: []
+  defp generate_sort_queries([], _schema, _functions, _existing_sort_args, _opts), do: []
+  defp generate_sort_queries(_fields, _schema, _functions, _existing_sort_args, %{skip_sort: true}), do: []
 
-  defp generate_sort_queries(fields, schema, functions, _opts) do
+  defp generate_sort_queries(fields, schema, functions, existing_sort_args, _opts) do
     if Enum.member?(functions, :sort) do
       []
     else
@@ -563,41 +631,40 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         fields
         |> Enum.flat_map(fn field ->
           [
-            {:def, [],
-             [
-               {:sort, [], [{:query, [], nil}, "#{field}_asc"]},
-               [
-                 do:
-                   {:order_by, [],
-                    [
-                      {:query, [], nil},
-                      [{schema, {:schema_record, [], nil}}],
-                      [asc: {{:., [], [{:schema_record, [], nil}, field]}, [no_parens: true], []}]
-                    ]}
-               ]
-             ]},
-            {:def, [],
-             [
-               {:sort, [], [{:query, [], nil}, "#{field}_desc"]},
-               [
-                 do:
-                   {:order_by, [],
-                    [
-                      {:query, [], nil},
-                      [{schema, {:schema_record, [], nil}}],
-                      [
-                        desc:
-                          {{:., [], [{:schema_record, [], nil}, field]}, [no_parens: true], []}
-                      ]
-                    ]}
-               ]
-             ]}
+            generate_sort_query(schema, field, :asc, existing_sort_args),
+            generate_sort_query(schema, field, :desc, existing_sort_args)
           ]
         end)
         |> Enum.reverse()
       ]
       |> Enum.reverse()
     end
+  end
+
+  defp generate_sort_query(schema, field, direction, existing_sort_args) do
+    sort_name = "#{field}_#{Atom.to_string(direction)}"
+
+    if sort_name in existing_sort_args do
+      []
+    else
+      {:def, [],
+      [
+        {:sort, [], [{:query, [], nil}, sort_name]},
+        [
+          do:
+            {:order_by, [],
+            [
+              {:query, [], nil},
+              [{schema, {:schema_record, [], nil}}],
+              [
+                {direction,
+                  {{:., [], [{:schema_record, [], nil}, field]}, [no_parens: true], []}}
+              ]
+            ]}
+        ]
+      ]}
+    end
+
   end
 
   defp generate_with_query(_schema, _assoc, _functions, %{skip_assocs: true}), do: []
