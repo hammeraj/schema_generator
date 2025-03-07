@@ -64,7 +64,9 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
         quiet: false
       })
 
-      log(:yellow, :ci_warning, "please run `mix ecto.gen.queries #{path}` and commit", %{
+      cmd_args = args |> Enum.reject(& &1 == "--ci") |> Enum.join(" ")
+
+      log(:yellow, :ci_warning, "please run `mix ecto.gen.queries #{cmd_args}` and commit", %{
         quiet: false
       })
 
@@ -799,13 +801,10 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
          {:generated_schema_version, [], nil},
          [
            {{:__block__, [format: :keyword], [:do]},
-            {{:., [], [List, :first]}, [],
-             [
                {:@, [],
                 [
                   {:schema_gen_tag, [], nil}
-                ]}
-             ]}}
+                ]}}
          ]
        ]}
     ]
