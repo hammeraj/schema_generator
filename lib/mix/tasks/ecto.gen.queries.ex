@@ -3,9 +3,11 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
   Task for running a generator to write query functions. All query functions are designed to be composable,
   as in a query is required as the first argument. The task takes command line options to control
   generating functions to only what is necessary. If a function already exists with the same name
-  as a generated function, it will be skipped. The exception for this is if a sort function is tagged as
-  :sg_override, using the syntax `@tag :sg_override`. This function will be kept, with other sort functions
-  generated as usual. Any of the overridden functions will be added after the generated sort functions.
+  as a generated function, it will be skipped. The exception for this is if a sort function is marked as
+  one to keep, using the comment syntax `# schema_generator:keep_next_function`. This function will be kept,
+  with other sort functions generated as usual. Any of the overridden functions will be added after the
+  generated sort functions. This operation is not completely reversible, as it removes specs from sort functions
+  that are then grouped with the generated sort functions.
 
   ## Command line options
     * {files_or_directory} - which file or files to generate query functions for
@@ -118,12 +120,12 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     generated_regex = ~r/\@schema_gen_tag .*\n/
 
     precleaned_ast = Sourceror.parse_string!(filestring)
-    {sg_overridden_sorts_removed_ast, existing_sorts} = extract_existing_sort_functions(precleaned_ast)
+    {kept_sorts_removed_ast, existing_sorts} = extract_existing_sort_functions(precleaned_ast)
 
-    sg_overridden_removed_string = Sourceror.to_string(sg_overridden_sorts_removed_ast)
+    kept_sorts_removed_string = Sourceror.to_string(kept_sorts_removed_ast)
 
     cleaned_filestring =
-      case Regex.split(generated_regex, sg_overridden_removed_string) do
+      case Regex.split(generated_regex, kept_sorts_removed_string) do
         [start, _, finish] ->
           new_start =
             String.replace(
@@ -135,7 +137,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
           new_start <> finish
 
         _ ->
-          sg_overridden_removed_string
+          kept_sorts_removed_string
       end
 
     {_, version} =
@@ -315,7 +317,7 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       {sort_fun, [sort_arg | acc]}
     end)
 
-    existing_sort_funs_flat = existing_sort_funs |> List.flatten() |> Enum.map(&Zipper.node(&1)) |> Enum.reverse()
+    existing_sort_funs_flat = existing_sort_funs |> List.flatten() |> Enum.reverse()
     existing_sort_args_non_nil = Enum.filter(existing_sort_args, & &1)
 
     sort_functions =
@@ -463,23 +465,25 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
       ast
       |> Zipper.zip()
       |> Zipper.traverse([], fn
-        %Zipper{node: {:def, _meta1, [{:when, _meta2, [{:sort, _meta3, _args} | _]} | _]}} = zipper, acc ->
-          maybe_sg_override_tag = Zipper.left(zipper)
-
-          if sg_override_tag?(maybe_sg_override_tag) do
-            {zipper |> Zipper.remove() |> Zipper.find(:prev, &sg_override_tag?(&1)) |> Zipper.remove(), acc ++ [{nil, [maybe_sg_override_tag, zipper]}]}
+        %Zipper{node: {:@, [_trailing_comments, {:leading_comments, comments = [%{text: "# schema_generator:keep_next_function"}]} | _], [{_name, _meta2, _args} | _]}} = zipper, acc ->
+          function = Zipper.right(zipper)
+          if is_sort_function?(function) do
+            function_node_with_comments = function |> Zipper.node() |> Sourceror.prepend_comments(comments, :leading)
+            clean_zipper = zipper |> Zipper.remove() |> Zipper.next() |> Zipper.remove()
+            {clean_zipper, acc ++ [{get_filter_arg(function), [function_node_with_comments]}]}
           else
             {zipper, acc}
           end
 
-        %Zipper{node: {:def, _meta1, [{:sort, _meta2, [_first_arg, {:__block__, _meta3, [filter_arg]}]} | _]}} = zipper, acc ->
-          maybe_sg_override_tag = Zipper.left(zipper)
-
-          if sg_override_tag?(maybe_sg_override_tag) do
-            {zipper |> Zipper.remove() |> Zipper.find(:prev, &sg_override_tag?(&1)) |> Zipper.remove(), acc ++ [{filter_arg, [maybe_sg_override_tag, zipper]}]}
+        %Zipper{node: {:def, [_trailing_comments, {:leading_comments, [%{text: "# schema_generator:keep_next_function"}]} | _], [{_name, _meta2, _args} | _]}} = zipper, acc ->
+          maybe_spec = Zipper.left(zipper)
+          clean_zipper = if spec?(maybe_spec) do
+            zipper |> Zipper.left() |> Zipper.remove() |> Zipper.next() |> Zipper.remove()
           else
-            {zipper, acc}
+            Zipper.remove(zipper)
           end
+
+          {clean_zipper, acc ++ [{get_filter_arg(zipper), [Zipper.node(zipper)]}]}
 
         other, acc ->
           {other, acc}
@@ -488,17 +492,31 @@ defmodule Mix.Tasks.Ecto.Gen.Queries do
     {Zipper.node(zipper), accumulated_sorts}
   end
 
-  def sg_override_tag?(%Zipper{
-        node: node
-      }) do
-    sg_override_tag?(node)
-  end
-
-  def sg_override_tag?({:@, _meta1, [{:tag, _meta2, [{:__block__, _meta3, [:sg_override]}]}]}) do
+  def is_sort_function?(%Zipper{node: {:def, _meta1, [{:sort, _meta2, _args} | _]}}) do
     true
   end
 
-  def sg_override_tag?(_) do
+  def is_sort_function?(%Zipper{node: {:def, _meta1, [{:when, _meta2, [{:sort, _meta3, _args} | _]} | _]}}) do
+    true
+  end
+
+  def is_sort_function?(_other) do
+    false
+  end
+
+  defp get_filter_arg(%Zipper{node: {:def, _meta1, [{:sort, _meta2, [_first_arg, {:__block__, _meta3, [filter_arg]}]} | _]}}) do
+    filter_arg
+  end
+
+  defp get_filter_arg(_other) do
+    nil
+  end
+
+  defp spec?(%Zipper{node: {:@, _meta1, [{:spec, _meta2, _spec}]}}) do
+    true
+  end
+
+  defp spec?(_) do
     false
   end
 

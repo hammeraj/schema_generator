@@ -35,13 +35,15 @@ defmodule SchemaGenerator.TestSchema do
     |> cast_assoc(:posts)
   end
 
-  @tag :sg_override
+  @spec sort(Ecto.Query.t(), String.t()) :: Ecto.Query.t()
+  # schema_generator:keep_next_function
   def sort(query, "name_desc") do
     # this function is kept and replaces the generated one
     order_by(query, [user: u], desc: u.name)
   end
 
-  @tag :sg_override
+  # schema_generator:keep_next_function
+  @spec sort(Ecto.Query.t(), String.t()) :: Ecto.Query.t()
   def sort(query, filter) when filter in ["a", "b"] do
     # this function is kept but the args aren't matched to anything
     order_by(query, [user: u], desc: u.name)
