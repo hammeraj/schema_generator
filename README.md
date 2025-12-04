@@ -11,7 +11,7 @@ Add :schema_generator as a dependency to your project's `mix.exs`:
 ```
 defp deps do
   [
-    {:schema_generator, "~> 0.3", only: [:dev]}
+    {:schema_generator, "~> 0.5", only: [:dev]}
   ]
 end
 ```
@@ -66,19 +66,19 @@ mix ecto.rm.queries path/to/schema.ex
 This will remove any generated functions between the versioned control flow module attributes,
 indicated by the `@schema_gen_tag` attribute. The initial attribute will have a version hash used
 to determine if the generated functions have changed and should replace the previous generation.
-Any code written between the tags will be removed if the schema changes unless it is tagged with a custom
-tag (`@tag :sg_override`), so caution is required.
+Any code written between the tags will be removed if the schema changes unless it is commented with
+a control comment (`# schema_generator:keep_next_function`), so caution is required.
 
 ## Overrides
 
 Since most of these functions are named based on fields, if the function that would be generated already
 exists the generator will simply skip over it. The exception is the `sort/2` function, that accepts a
 composable query and a string for pattern matching. Since this only covers a simple subset of the possibilities
-for sorting, the library allows writing custom sort functions. These functions must be tagged with a module
-attribute: `@tag :sg_override`. Any sort function tagged this way will be grouped with the other sort functions,
+for sorting, the library allows writing custom sort functions. These functions must be tagged with a comment: 
+`# schema_generator:keep_next_function`. Any sort function tagged this way will be grouped with the other sort functions,
 and if the sorting argument matches one that would be generated, it will skip the generation. Any other function
-tagged with `@tag :sg_override` will be ignored, and any generated functions that would be skipped are still
-skipped.
+tagged with `# schema_generator:keep_next_function` will be ignored, and any generated functions that would be
+skipped are still skipped.
 
 ### Warning
 This library assumes that the files compile properly. Unexpected behavior may occur if the file is an

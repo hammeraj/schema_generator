@@ -4,7 +4,7 @@ defmodule SchemaGenerator.MixProject do
   def project do
     [
       app: :schema_generator,
-      version: "0.4.0",
+      version: "0.5.0",
       elixir: "~> 1.15",
       description: description(),
       start_permanent: Mix.env() == :prod,
